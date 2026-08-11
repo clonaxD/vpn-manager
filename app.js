@@ -5,17 +5,17 @@ const $=id=>document.getElementById(id);
 if(!ok){$("setupWarning").classList.remove("hidden");return}
 const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY);
 let session=null,clients=[];
-const labels={"14d":"14 дней","1m":"1 месяц","2m":"2 месяца","6m":"6 месяцев","12m":"12 месяцев"};
+const labels={"trial":"Пробный — 24 часа","14d":"14 дней","1m":"1 месяц","2m":"2 месяца","6m":"6 месяцев","12m":"12 месяцев"};
 const pad=n=>String(n).padStart(2,"0");
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`};
 const parse=s=>{const [y,m,d]=s.split("-").map(Number);return new Date(y,m-1,d,12)};
 const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const fmt=s=>{if(!s)return"";const[y,m,d]=s.split("-");return `${d}.${m}.${y}`};
-function addPeriod(start,p){const d=parse(start);if(p==="14d"){d.setDate(d.getDate()+14);return iso(d)}const mm={"1m":1,"2m":2,"6m":6,"12m":12}[p]||1,day=d.getDate();d.setDate(1);d.setMonth(d.getMonth()+mm);const last=new Date(d.getFullYear(),d.getMonth()+1,0).getDate();d.setDate(Math.min(day,last));return iso(d)}
+function addPeriod(start,p){const d=parse(start);if(p==="trial"){d.setDate(d.getDate()+1);return iso(d)}if(p==="14d"){d.setDate(d.getDate()+14);return iso(d)}const mm={"1m":1,"2m":2,"6m":6,"12m":12}[p]||1,day=d.getDate();d.setDate(1);d.setMonth(d.getMonth()+mm);const last=new Date(d.getFullYear(),d.getMonth()+1,0).getDate();d.setDate(Math.min(day,last));return iso(d)}
 const days=s=>Math.round((parse(s)-parse(today()))/86400000);
 const status=s=>days(s)<0?["Истекла","expired"]:days(s)<=7?["Скоро","soon"]:["Активна","active"];
 const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");
-const options=()=>`<option value="14d">14 дней</option><option value="1m">1 месяц</option><option value="2m">2 месяца</option><option value="6m">6 месяцев</option><option value="12m">12 месяцев</option>`;
+const options=()=>`<option value="trial">Пробный — 24 часа</option><option value="14d">14 дней</option><option value="1m">1 месяц</option><option value="2m">2 месяца</option><option value="6m">6 месяцев</option><option value="12m">12 месяцев</option>`;
 function msg(t="",bad=false){$("message").textContent=t;$("message").style.color=bad?"var(--r)":"var(--g)"}
 async function load(){const{data,error}=await sb.from("clients").select("*").order("end_date",{ascending:true});if(error)return msg(error.message,true);clients=data||[];render()}
 function renderStats(){let a=0,s=0,e=0;clients.forEach(c=>{const d=days(c.end_date);if(d<0)e++;else{a++;if(d<=7)s++}});$("sTotal").textContent=clients.length;$("sActive").textContent=a;$("sSoon").textContent=s;$("sExpired").textContent=e}
@@ -27,9 +27,9 @@ function preview(){const s=$("startDate").value;if(s)$("preview").textContent="�
 $("addForm").addEventListener("submit",async e=>{e.preventDefault();const start=$("startDate").value,p=$("period").value;const payload={user_id:session.user.id,name:$("name").value.trim(),phone:$("phone").value.trim(),start_date:start,end_date:addPeriod(start,p),period:p,note:$("note").value.trim()};const{error}=await sb.from("clients").insert(payload);if(error)return msg(error.message,true);e.target.reset();$("startDate").value=today();$("period").value="1m";preview();msg("Клиент добавлен");load()});
 document.addEventListener("click",async e=>{const b=e.target.closest("[data-a]");if(!b)return;const id=Number(b.dataset.id),c=clients.find(x=>x.id===id);if(!c)return;
 if(b.dataset.a==="delete"){if(!confirm(`Удалить клиента «${c.name}»?`))return;const{error}=await sb.from("clients").delete().eq("id",id);if(error)return msg(error.message,true);msg("Клиент удалён");return load()}
-if(b.dataset.a==="edit"){$("editId").value=c.id;$("editName").value=c.name||"";$("editPhone").value=c.phone||"";$("editStart").value=c.start_date;$("editNote").value=c.note||"";$("editDialog").showModal();return}
+if(b.dataset.a==="edit"){$("editId").value=c.id;$("editName").value=c.name||"";$("editPhone").value=c.phone||"";$("editStart").value=c.start_date;$("editDaysLeft").value=Math.max(0,days(c.end_date));$("editNote").value=c.note||"";$("editDialog").showModal();return}
 if(b.dataset.a==="extend"){const scope=b.closest(".actions,.manage-body"),sel=scope.querySelector(`[data-sel="${id}"]`),p=sel.value,base=parse(c.end_date)>=parse(today())?c.end_date:today(),newEnd=addPeriod(base,p);const{error}=await sb.from("clients").update({end_date:newEnd,period:p}).eq("id",id);if(error)return msg(error.message,true);msg("Подписка продлена");return load()}})
-$("editForm").addEventListener("submit",async e=>{e.preventDefault();const id=Number($("editId").value);const{error}=await sb.from("clients").update({name:$("editName").value.trim(),phone:$("editPhone").value.trim(),start_date:$("editStart").value,note:$("editNote").value.trim()}).eq("id",id);if(error)return msg(error.message,true);$("editDialog").close();msg("Изменения сохранены");load()});
+$("editForm").addEventListener("submit",async e=>{e.preventDefault();const id=Number($("editId").value),left=Math.max(0,parseInt($("editDaysLeft").value||"0",10)),end=parse(today());end.setDate(end.getDate()+left);const{error}=await sb.from("clients").update({name:$("editName").value.trim(),phone:$("editPhone").value.trim(),start_date:$("editStart").value,end_date:iso(end),note:$("editNote").value.trim()}).eq("id",id);if(error)return msg(error.message,true);$("editDialog").close();msg("Изменения сохранены");load()});
 $("closeEdit").onclick=()=>$("editDialog").close();$("search").oninput=render;$("refreshBtn").onclick=load;$("startDate").onchange=preview;$("period").onchange=preview;$("logoutBtn").onclick=()=>sb.auth.signOut();
 $("loginForm").addEventListener("submit",async e=>{e.preventDefault();const{error}=await sb.auth.signInWithPassword({email:$("email").value.trim(),password:$("password").value});$("authMessage").textContent=error?("Ошибка входа: "+error.message):""});
 sb.auth.onAuthStateChange(async(_e,s)=>{session=s;const yes=!!s;$("authScreen").classList.toggle("hidden",yes);$("app").classList.toggle("hidden",!yes);if(yes){$("startDate").value=today();preview();await load()}});
