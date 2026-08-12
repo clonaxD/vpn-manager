@@ -377,10 +377,10 @@ $("editForm").addEventListener("submit",async e=>{
 });
 
 $("closeEdit").onclick=()=>$("editDialog").close();
+if($("editPeriod"))$("editPeriod").onchange=()=>{const life=$("editPeriod").value==="lifetime";$("editDaysLeft").disabled=life;if(life)$("editDaysLeft").value=""};
 $("closeHistory").onclick=()=>$("historyDialog").close();
 $("attentionBtn").onclick=()=>{attentionOnly=!attentionOnly;$("attentionBtn").classList.toggle("attention-active",attentionOnly);$("attentionBtn").firstChild.textContent=attentionOnly?"← Все клиенты ":"⚠ Требуют внимания ";render()};$("search").oninput=render;if($("clientFilter"))$("clientFilter").onchange=e=>{clientFilter=e.target.value;render()};$("refreshBtn").onclick=load;if($("importWgBtn"))$("importWgBtn").onclick=importWireGuardClients;$("startDate").onchange=preview;$("period").onchange=()=>{preview();updateReferralHint()};$("referrer").onchange=updateReferralHint;$("logoutBtn").onclick=()=>sb.auth.signOut();
 $("loginForm").addEventListener("submit",async e=>{e.preventDefault();const{error}=await sb.auth.signInWithPassword({email:$("email").value.trim(),password:$("password").value});$("authMessage").textContent=error?("Ошибка входа: "+error.message):""});
 sb.auth.onAuthStateChange(async(_e,s)=>{session=s;const yes=!!s;$("authScreen").classList.toggle("hidden",yes);$("app").classList.toggle("hidden",!yes);if(yes){$("startDate").value=today();$("period").value="1m";preview();await load();updateReferralHint()}});
 (async()=>{const{data}=await sb.auth.getSession();session=data.session;const yes=!!session;$("authScreen").classList.toggle("hidden",yes);$("app").classList.toggle("hidden",!yes);if(yes){$("startDate").value=today();$("period").value="1m";preview();await load();updateReferralHint()}})();
 })();
-if($("editPeriod"))$("editPeriod").onchange=()=>{const life=$("editPeriod").value==="lifetime";$("editDaysLeft").disabled=life;if(life)$("editDaysLeft").value=""};
