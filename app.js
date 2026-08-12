@@ -287,7 +287,7 @@ async function importWireGuardClients(){
 }
 
 $("addForm").addEventListener("submit",async e=>{
-  e.preventDefault();
+  e.preventDefault();const p=$("period").value;
   const start=$("startDate").value,p=$("period").value,referrerId=$("referrer").value?Number($("referrer").value):null;
   let wgClientId=null;
   try{
@@ -297,7 +297,7 @@ $("addForm").addEventListener("submit",async e=>{
       wgClientId=x.client?.id||null;
       if(!wgClientId)throw new Error("Не получен ID WireGuard");
     }
-    const payload={user_id:session.user.id,name:$("name").value.trim(),phone:$("phone").value.trim(),start_date:start,end_date:addPeriod(start,p),period:p,note:$("note").value.trim(),referrer_id:referrerId,wg_client_id:wgClientId};
+    const payload={user_id:session.user.id,name:$("name").value.trim(),phone:$("phone").value.trim(),start_date:start,end_date:p==="lifetime"?null:addPeriod(start,p),period:p,note:$("note").value.trim(),referrer_id:referrerId,wg_client_id:wgClientId};
     const {data:created,error}=await sb.from("clients").insert(payload).select("id").single();if(error)throw error; if(created?.id)await logHistory(created.id,"created","Клиент создан");
 
     const bonus=referralBonus[p]||0;
@@ -327,7 +327,7 @@ document.addEventListener("click",async e=>{
       return load();
     }
     if(a==="edit"){
-      $("editId").value=c.id;$("editName").value=c.name||"";$("editPhone").value=c.phone||"";$("editStart").value=c.start_date;$("editDaysLeft").value=c.period==="lifetime"?"":(days(c.end_date)===null?"":Math.max(0,days(c.end_date)));$("editNote").value=c.note||"";$("editDialog").showModal();return;
+      $("editId").value=c.id;$("editName").value=c.name||"";$("editPhone").value=c.phone||"";$("editStart").value=c.start_date;$("editDaysLeft").value=c.period==="lifetime"?"":(days(c.end_date)===null?"":Math.max(0,days(c.end_date)));if($("editPeriod"))$("editPeriod").value=c.period||"1m";$("editNote").value=c.note||"";$("editDialog").showModal();return;
     }
     if(a==="extend"){
       const scope=b.closest(".actions,.manage-body"),sel=scope.querySelector(`[data-sel="${id}"]`),p=sel.value;
@@ -373,7 +373,7 @@ $("editForm").addEventListener("submit",async e=>{
   const{error}=await sb.from("clients").update({name:$("editName").value.trim(),phone:$("editPhone").value.trim(),start_date:$("editStart").value,end_date:iso(end),note:$("editNote").value.trim()}).eq("id",id);
   if(error)return msg(error.message,true);
   try{if(c?.wg_client_id){await api(`/api/wg/client/${c.wg_client_id}/${left<=0?"disable":"enable"}`,{method:"POST"})}}catch{}
-  await logHistory(id,"edited",`Данные клиента изменены; осталось дней: ${left}`);$("editDialog").close();msg("Изменения сохранены");load();
+  await logHistory(id,"edited",`Данные клиента изменены; ${editPeriod==="lifetime"?"тариф Навсегда ∞":"осталось дней: "+left}`);$("editDialog").close();msg("Изменения сохранены");load();
 });
 
 $("closeEdit").onclick=()=>$("editDialog").close();
@@ -383,3 +383,4 @@ $("loginForm").addEventListener("submit",async e=>{e.preventDefault();const{erro
 sb.auth.onAuthStateChange(async(_e,s)=>{session=s;const yes=!!s;$("authScreen").classList.toggle("hidden",yes);$("app").classList.toggle("hidden",!yes);if(yes){$("startDate").value=today();$("period").value="1m";preview();await load();updateReferralHint()}});
 (async()=>{const{data}=await sb.auth.getSession();session=data.session;const yes=!!session;$("authScreen").classList.toggle("hidden",yes);$("app").classList.toggle("hidden",!yes);if(yes){$("startDate").value=today();$("period").value="1m";preview();await load();updateReferralHint()}})();
 })();
+if($("editPeriod"))$("editPeriod").onchange=()=>{const life=$("editPeriod").value==="lifetime";$("editDaysLeft").disabled=life;if(life)$("editDaysLeft").value=""};
