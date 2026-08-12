@@ -6,7 +6,7 @@ if(!configured){$("setupWarning").classList.remove("hidden");return}
 
 const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY);
 const BACKEND="https://80-90-179-65.sslip.io";
-let session=null,clients=[],wgClients=[];
+let session=null,clients=[],wgClients=[],attentionOnly=false;
 
 const labels={"trial":"Пробный — 24 часа","14d":"14 дней","1m":"1 месяц","2m":"2 месяца","6m":"6 месяцев","12m":"12 месяцев","imported":"Импорт"};
 const referralBonus={"1m":14,"6m":30,"12m":60};
@@ -32,6 +32,39 @@ function addPeriod(start,p){
 }
 function addDaysToDate(s,n){const d=parse(s);d.setDate(d.getDate()+n);return iso(d)}
 function msg(t="",bad=false){$("message").textContent=t;$("message").style.color=bad?"var(--red)":"var(--green)"}
+
+function attentionNeeded(c){
+  const d=days(c.end_date),w=wgFor(c);
+  return d===null || d<=7 || (c.wg_client_id && (!w || !w.enabled));
+}
+function handshakeText(w){
+  if(!w?.latestHandshakeAt)return "Никогда";
+  const t=new Date(w.latestHandshakeAt);
+  if(Number.isNaN(t.getTime()))return "Неизвестно";
+  const diff=Math.max(0,Date.now()-t.getTime()),min=Math.floor(diff/60000);
+  if(min<1)return "только что";
+  if(min<60)return `${min} мин. назад`;
+  const h=Math.floor(min/60); if(h<24)return `${h} ч. назад`;
+  const d=Math.floor(h/24); return `${d} дн. назад`;
+}
+async function logHistory(clientId,eventType,text){
+  try{
+    await sb.from("client_history").insert({user_id:session.user.id,client_id:clientId,event_type:eventType,description:text});
+  }catch(e){console.warn("history:",e)}
+}
+async function showHistory(c){
+  $("historyTitle").textContent=`История — ${c.name}`;
+  $("historyList").innerHTML='<div class="history-empty">Загрузка…</div>';
+  $("historyDialog").showModal();
+  const {data,error}=await sb.from("client_history").select("*").eq("client_id",c.id).order("created_at",{ascending:false});
+  if(error){$("historyList").innerHTML=`<div class="history-empty">${esc(error.message)}</div>`;return}
+  const list=data||[];
+  $("historyList").innerHTML=list.length?list.map(x=>{
+    const dt=new Date(x.created_at);
+    return `<div class="history-item"><div><b>${esc(x.description||x.event_type)}</b><small>${dt.toLocaleString("ru-RU")}</small></div></div>`;
+  }).join(""):'<div class="history-empty">История начнёт записываться с версии 5.6.</div>';
+}
+
 
 async function api(path,opts={}){
   let apiToken=localStorage.getItem("vpn_manager_api_token")||"";
@@ -103,13 +136,13 @@ function renderStats(){
 }
 function filtered(){
   const q=$("search").value.trim().toLowerCase();
-  return q?clients.filter(c=>(c.name||"").toLowerCase().includes(q)||(c.phone||"").toLowerCase().includes(q)||(c.note||"").toLowerCase().includes(q)):clients;
+  const base=attentionOnly?clients.filter(attentionNeeded):clients; return q?base.filter(c=>(c.name||"").toLowerCase().includes(q)||(c.phone||"").toLowerCase().includes(q)||(c.note||"").toLowerCase().includes(q)):base;
 }
 function wgStatus(c){
   if(!c.wg_client_id)return '<span class="wg-status none">Не привязан</span>';
   const w=wgFor(c);
   if(!w)return '<span class="wg-status off">Не найден</span>';
-  return `<span class="wg-status ${w.enabled?"on":"off"}">${w.enabled?"Включён":"Отключён"}</span>${w.address?`<small>${esc(w.address)}</small>`:""}`;
+  return `<span class="wg-status ${w.enabled?"on":"off"}">${w.enabled?"● VPN включён":"● VPN отключён"}</span>${w.address?`<small>IP: ${esc(w.address)}</small>`:""}<small>Последнее подключение: ${esc(handshakeText(w))}</small>`;
 }
 function wgControls(c){
   if(!c.wg_client_id){
@@ -130,10 +163,10 @@ function wgControls(c){
   </div>`;
 }
 function subControls(c){
-  return `<select data-sel="${c.id}"><option value="trial">24 часа</option><option value="14d">14 дней</option><option value="1m">1 месяц</option><option value="2m">2 месяца</option><option value="6m">6 месяцев</option><option value="12m">12 месяцев</option></select><button data-a="extend" data-id="${c.id}">Продлить</button><button class="secondary" data-a="edit" data-id="${c.id}">Изменить</button><button class="danger" data-a="delete" data-id="${c.id}">Удалить</button>`;
+  return `<select data-sel="${c.id}"><option value="trial">24 часа</option><option value="14d">14 дней</option><option value="1m">1 месяц</option><option value="2m">2 месяца</option><option value="6m">6 месяцев</option><option value="12m">12 месяцев</option></select><button data-a="extend" data-id="${c.id}">Продлить</button><button class="secondary" data-a="edit" data-id="${c.id}">Изменить</button><button class="secondary" data-a="history" data-id="${c.id}">История</button><button class="danger" data-a="delete-menu" data-id="${c.id}">Удаление…</button>`;
 }
 function render(){sortClientsNewestFirst();
-  renderStats();const list=filtered();$("empty").classList.toggle("hidden",list.length>0);
+  renderStats();const ac=clients.filter(attentionNeeded).length;if($("attentionCount"))$("attentionCount").textContent=ac;const list=filtered();$("empty").classList.toggle("hidden",list.length>0);
   $("rows").innerHTML=list.map(c=>{const[st,cl]=status(c.end_date);return `<tr>
     <td><b>${esc(c.name)}</b>${c.note?`<small>${esc(c.note)}</small>`:""}</td>
     <td>${esc(c.phone||"")}</td>
@@ -239,7 +272,7 @@ $("addForm").addEventListener("submit",async e=>{
       if(!wgClientId)throw new Error("Не получен ID WireGuard");
     }
     const payload={user_id:session.user.id,name:$("name").value.trim(),phone:$("phone").value.trim(),start_date:start,end_date:addPeriod(start,p),period:p,note:$("note").value.trim(),referrer_id:referrerId,wg_client_id:wgClientId};
-    const {error}=await sb.from("clients").insert(payload);if(error)throw error;
+    const {data:created,error}=await sb.from("clients").insert(payload).select("id").single();if(error)throw error; if(created?.id)await logHistory(created.id,"created","Клиент создан");
 
     const bonus=referralBonus[p]||0;
     if(referrerId&&bonus>0){
@@ -259,9 +292,19 @@ document.addEventListener("click",async e=>{
   const id=Number(b.dataset.id),c=clients.find(x=>x.id===id);if(!c)return;
   try{
     const a=b.dataset.a;
-    if(a==="delete"){
-      if(!confirm(`Удалить клиента «${c.name}» из CRM? WireGuard-профиль останется.`))return;
-      const{error}=await sb.from("clients").delete().eq("id",id);if(error)throw error;msg("Клиент удалён из CRM");return load();
+    if(a==="history"){return showHistory(c)}
+    if(a==="delete-menu"){
+      const alsoWG=c.wg_client_id && confirm(`Удаление «${c.name}».\n\nОК — перейти к ОПАСНОМУ удалению из VPN MANAGER + WireGuard.\nОтмена — предложить безопасное удаление только из VPN MANAGER.`);
+      if(alsoWG){
+        const typed=prompt(`ОПАСНАЯ ОПЕРАЦИЯ.\nWireGuard-профиль будет удалён без возможности восстановления.\n\nДля подтверждения введи ТОЧНО имя клиента:\n${c.name}`);
+        if(typed!==c.name){msg("Удаление отменено");return}
+        if(!confirm(`Последнее подтверждение: удалить «${c.name}» ИЗ WIREGUARD и VPN MANAGER?`))return;
+        await api(`/api/wg/client/${c.wg_client_id}`,{method:"DELETE"});
+        const{error}=await sb.from("clients").delete().eq("id",id);if(error)throw error;
+        msg("Клиент удалён из VPN MANAGER и WireGuard");return load();
+      }
+      if(!confirm(`Удалить «${c.name}» ТОЛЬКО из VPN MANAGER?\nWireGuard-профиль останется без изменений.`))return;
+      const{error}=await sb.from("clients").delete().eq("id",id);if(error)throw error;msg("Удалено только из VPN MANAGER. WireGuard сохранён.");return load();
     }
     if(a==="edit"){
       $("editId").value=c.id;$("editName").value=c.name||"";$("editPhone").value=c.phone||"";$("editStart").value=c.start_date;$("editDaysLeft").value=days(c.end_date)===null?"":Math.max(0,days(c.end_date));$("editNote").value=c.note||"";$("editDialog").showModal();return;
@@ -271,22 +314,24 @@ document.addEventListener("click",async e=>{
       const base=(days(c.end_date)!==null&&days(c.end_date)>0)?c.end_date:today(),newEnd=addPeriod(base,p);
       const{error}=await sb.from("clients").update({end_date:newEnd,period:p}).eq("id",id);if(error)throw error;
       if(c.wg_client_id)await api(`/api/wg/client/${c.wg_client_id}/enable`,{method:"POST"});
-      msg("Подписка продлена, VPN включён");return load();
+      await logHistory(id,"extended",`Подписка продлена: ${labels[p]||p}, до ${fmt(newEnd)}; VPN включён`);msg("Подписка продлена, VPN включён");return load();
     }
     if(a==="wg-create"){
       const x=await apiJson("/api/wg/client",{method:"POST",body:JSON.stringify({name:c.name})});
       const wid=x.client?.id;if(!wid)throw new Error("Не получен ID WireGuard");
-      const{error}=await sb.from("clients").update({wg_client_id:wid}).eq("id",id);if(error)throw error;msg("WireGuard создан");return load();
+      const{error}=await sb.from("clients").update({wg_client_id:wid}).eq("id",id);if(error)throw error;await logHistory(id,"wg_created","Создан WireGuard-профиль");msg("WireGuard создан");return load();
     }
     if(a==="wg-link"){
       const sel=document.querySelector(`[data-link="${id}"]`),wid=sel?.value;if(!wid)throw new Error("Выбери WireGuard-клиента");
-      const{error}=await sb.from("clients").update({wg_client_id:wid}).eq("id",id);if(error)throw error;msg("WireGuard привязан");return load();
+      const{error}=await sb.from("clients").update({wg_client_id:wid}).eq("id",id);if(error)throw error;await logHistory(id,"wg_linked","Привязан существующий WireGuard-профиль");msg("WireGuard привязан");return load();
     }
     if(a==="wg-unlink"){
-      const{error}=await sb.from("clients").update({wg_client_id:null}).eq("id",id);if(error)throw error;msg("Привязка сброшена");return load();
+      const{error}=await sb.from("clients").update({wg_client_id:null}).eq("id",id);if(error)throw error;await logHistory(id,"wg_unlinked","Привязка WireGuard сброшена (профиль не удалён)");msg("Привязка сброшена");return load();
     }
     if(a==="wg-enable"||a==="wg-disable"){
-      await api(`/api/wg/client/${c.wg_client_id}/${a==="wg-enable"?"enable":"disable"}`,{method:"POST"});msg(a==="wg-enable"?"VPN включён":"VPN отключён");return load();
+      await api(`/api/wg/client/${c.wg_client_id}/${a==="wg-enable"?"enable":"disable"}`,{method:"POST"});
+      await logHistory(id,a==="wg-enable"?"wg_enabled":"wg_disabled",a==="wg-enable"?"VPN включён":"VPN отключён");
+      msg(a==="wg-enable"?"VPN включён":"VPN отключён");return load();
     }
     if(a==="wg-qr"||a==="wg-share-qr"){
       const r=await api(`/api/wg/client/${c.wg_client_id}/qr`),blob=await r.blob();
@@ -308,10 +353,12 @@ $("editForm").addEventListener("submit",async e=>{
   const{error}=await sb.from("clients").update({name:$("editName").value.trim(),phone:$("editPhone").value.trim(),start_date:$("editStart").value,end_date:iso(end),note:$("editNote").value.trim()}).eq("id",id);
   if(error)return msg(error.message,true);
   try{if(c?.wg_client_id){await api(`/api/wg/client/${c.wg_client_id}/${left<=0?"disable":"enable"}`,{method:"POST"})}}catch{}
-  $("editDialog").close();msg("Изменения сохранены");load();
+  await logHistory(id,"edited",`Данные клиента изменены; осталось дней: ${left}`);$("editDialog").close();msg("Изменения сохранены");load();
 });
 
-$("closeEdit").onclick=()=>$("editDialog").close();$("search").oninput=render;$("refreshBtn").onclick=load;if($("importWgBtn"))$("importWgBtn").onclick=importWireGuardClients;$("startDate").onchange=preview;$("period").onchange=()=>{preview();updateReferralHint()};$("referrer").onchange=updateReferralHint;$("logoutBtn").onclick=()=>sb.auth.signOut();
+$("closeEdit").onclick=()=>$("editDialog").close();
+$("closeHistory").onclick=()=>$("historyDialog").close();
+$("attentionBtn").onclick=()=>{attentionOnly=!attentionOnly;$("attentionBtn").classList.toggle("attention-active",attentionOnly);$("attentionBtn").firstChild.textContent=attentionOnly?"← Все клиенты ":"⚠ Требуют внимания ";render()};$("search").oninput=render;$("refreshBtn").onclick=load;if($("importWgBtn"))$("importWgBtn").onclick=importWireGuardClients;$("startDate").onchange=preview;$("period").onchange=()=>{preview();updateReferralHint()};$("referrer").onchange=updateReferralHint;$("logoutBtn").onclick=()=>sb.auth.signOut();
 $("loginForm").addEventListener("submit",async e=>{e.preventDefault();const{error}=await sb.auth.signInWithPassword({email:$("email").value.trim(),password:$("password").value});$("authMessage").textContent=error?("Ошибка входа: "+error.message):""});
 sb.auth.onAuthStateChange(async(_e,s)=>{session=s;const yes=!!s;$("authScreen").classList.toggle("hidden",yes);$("app").classList.toggle("hidden",!yes);if(yes){$("startDate").value=today();$("period").value="1m";preview();await load();updateReferralHint()}});
 (async()=>{const{data}=await sb.auth.getSession();session=data.session;const yes=!!session;$("authScreen").classList.toggle("hidden",yes);$("app").classList.toggle("hidden",!yes);if(yes){$("startDate").value=today();$("period").value="1m";preview();await load();updateReferralHint()}})();

@@ -45,3 +45,11 @@
 }
 
 .status.unknown{color:var(--muted);background:rgba(255,255,255,.06)}
+
+/* v5.6 */
+#attentionBtn{white-space:nowrap}.attention-active{border-color:var(--y)!important;color:var(--y)!important}
+.history-box{width:min(560px,calc(100vw - 24px))}.history-list{display:grid;gap:8px;max-height:60vh;overflow:auto}
+.history-item{padding:11px;background:var(--p2);border:1px solid var(--b);border-radius:10px}
+.history-item small{display:block;color:var(--m);margin-top:4px}.history-empty{color:var(--m);padding:14px;text-align:center}
+.wg-status+small,.wg-status~small{margin-top:3px}
+@media(max-width:900px){#attentionBtn{width:100%}.history-box{padding:14px}}
