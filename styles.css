@@ -43,3 +43,5 @@
     line-height:1;
   }
 }
+
+.status.unknown{color:var(--muted);background:rgba(255,255,255,.06)}

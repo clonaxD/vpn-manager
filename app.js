@@ -8,7 +8,7 @@ const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY);
 const BACKEND="https://80-90-179-65.sslip.io";
 let session=null,clients=[],wgClients=[];
 
-const labels={"trial":"Пробный — 24 часа","14d":"14 дней","1m":"1 месяц","2m":"2 месяца","6m":"6 месяцев","12m":"12 месяцев"};
+const labels={"trial":"Пробный — 24 часа","14d":"14 дней","1m":"1 месяц","2m":"2 месяца","6m":"6 месяцев","12m":"12 месяцев","imported":"Импорт"};
 const referralBonus={"1m":14,"6m":30,"12m":60};
 const pad=n=>String(n).padStart(2,"0");
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`};
@@ -16,8 +16,8 @@ const parse=s=>{const[y,m,d]=s.split("-").map(Number);return new Date(y,m-1,d,12
 const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const fmt=s=>{if(!s)return"";const[y,m,d]=s.split("-");return `${d}.${m}.${y}`};
 const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");
-const days=s=>Math.round((parse(s)-parse(today()))/86400000);
-const status=s=>days(s)<=0?["Истекла","expired"]:days(s)<=7?["Скоро","soon"]:["Активна","active"];
+const days=s=>s?Math.round((parse(s)-parse(today()))/86400000):null;
+const status=s=>{const d=days(s);return d===null?["Срок не указан","unknown"]:d<=0?["Истекла","expired"]:d<=7?["Скоро","soon"]:["Активна","active"]};
 
 function addPeriod(start,p){
   const d=parse(start);
@@ -90,7 +90,7 @@ async function load(){
 }
 function renderStats(){
   let a=0,s=0,e=0;
-  clients.forEach(c=>{const d=days(c.end_date);if(d<=0)e++;else{a++;if(d<=7)s++}});
+  clients.forEach(c=>{const d=days(c.end_date);if(d===null)return;if(d<=0)e++;else{a++;if(d<=7)s++}});
   $("sTotal").textContent=clients.length;$("sActive").textContent=a;$("sSoon").textContent=s;$("sExpired").textContent=e;
 }
 function filtered(){
@@ -132,13 +132,13 @@ function render(){
     <td>${esc((clients.find(x=>x.id===c.referrer_id)||{}).name||"—")}</td>
     <td>${wgStatus(c)}${wgControls(c)}</td>
     <td>${esc(labels[c.period]||c.period||"—")}</td>
-    <td>${fmt(c.start_date)}</td><td>${fmt(c.end_date)}</td><td>${days(c.end_date)}</td>
+    <td>${fmt(c.start_date)}</td><td>${c.end_date?fmt(c.end_date):"—"}</td><td>${days(c.end_date)===null?"—":days(c.end_date)}</td>
     <td><span class="status ${cl}">${st}</span></td>
     <td><div class="actions">${subControls(c)}</div></td>
   </tr>`}).join("");
   $("cards").innerHTML=list.map(c=>{const[st,cl]=status(c.end_date);return `<article class="card">
     <div class="card-top"><div><h3>${esc(c.name)}</h3>${c.phone?`<a class="phone" href="tel:${esc(c.phone)}">${esc(c.phone)}</a>`:""}</div><span class="status ${cl}">${st}</span></div>
-    <div class="info"><div><small>Тариф</small><b>${esc(labels[c.period]||c.period||"—")}</b></div><div><small>До</small><b>${fmt(c.end_date)}</b></div><div><small>Осталось</small><b>${days(c.end_date)} дн.</b></div></div>
+    <div class="info"><div><small>Тариф</small><b>${esc(labels[c.period]||c.period||"—")}</b></div><div><small>До</small><b>${c.end_date?fmt(c.end_date):"—"}</b></div><div><small>Осталось</small><b>${days(c.end_date)===null?"—":days(c.end_date)+" дн."}</b></div></div>
     ${c.referrer_id?`<div class="note">Пригласил: <b>${esc((clients.find(x=>x.id===c.referrer_id)||{}).name||"—")}</b></div>`:""}
     ${c.note?`<div class="note">${esc(c.note)}</div>`:""}
     <div class="note"><b>WireGuard:</b> ${wgStatus(c)}${wgControls(c)}</div>
@@ -156,6 +156,67 @@ async function shareBlob(blob,filename,title){
   a.href=url;a.download=filename;a.click();
   setTimeout(()=>URL.revokeObjectURL(url),30000);
   msg("Системная отправка файлов недоступна — файл скачан.");
+}
+
+
+function parseDateFromWgName(name){
+  const s=String(name||"");
+  const m=s.match(/(?:^|[\s(])(\d{1,2})[.\-](\d{1,2})[.\-](\d{2,4})(?:\)|\s|$)/);
+  if(!m)return null;
+  let y=Number(m[3]); if(y<100)y+=2000;
+  const d=Number(m[1]),mo=Number(m[2]);
+  const dt=new Date(y,mo-1,d,12);
+  if(dt.getFullYear()!==y||dt.getMonth()!==mo-1||dt.getDate()!==d)return null;
+  return iso(dt);
+}
+
+function wgCreatedDate(c){
+  const raw=c.createdAt||c.updatedAt;
+  if(raw){
+    const d=new Date(raw);
+    if(!Number.isNaN(d.getTime()))return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  }
+  return today();
+}
+
+async function importWireGuardClients(){
+  if(!confirm("Импортировать существующих клиентов WireGuard в VPN MANAGER? WireGuard-профили НЕ будут изменены или удалены."))return;
+
+  try{
+    await loadWG();
+    const existing=new Set(clients.map(c=>c.wg_client_id).filter(Boolean));
+    const candidates=wgClients.filter(w=>{
+      const n=String(w.name||"");
+      return w.id && !existing.has(w.id) && !/^TEST_VPN_MANAGER$/i.test(n);
+    });
+
+    if(!candidates.length){
+      msg("Новых WireGuard-клиентов для импорта нет.");
+      return;
+    }
+
+    const rows=candidates.map(w=>({
+      user_id:session.user.id,
+      name:w.name||`WireGuard ${w.address||""}`,
+      phone:"",
+      start_date:wgCreatedDate(w),
+      end_date:parseDateFromWgName(w.name),
+      period:"imported",
+      note:"Импортировано из WireGuard",
+      referrer_id:null,
+      wg_client_id:w.id
+    }));
+
+    const {error}=await sb.from("clients").insert(rows);
+    if(error)throw error;
+
+    const withDate=rows.filter(r=>r.end_date).length;
+    const withoutDate=rows.length-withDate;
+    msg(`Импортировано: ${rows.length}. С датой: ${withDate}, без срока: ${withoutDate}.`);
+    await load();
+  }catch(err){
+    msg("Ошибка импорта: "+err.message,true);
+  }
 }
 
 $("addForm").addEventListener("submit",async e=>{
@@ -195,11 +256,11 @@ document.addEventListener("click",async e=>{
       const{error}=await sb.from("clients").delete().eq("id",id);if(error)throw error;msg("Клиент удалён из CRM");return load();
     }
     if(a==="edit"){
-      $("editId").value=c.id;$("editName").value=c.name||"";$("editPhone").value=c.phone||"";$("editStart").value=c.start_date;$("editDaysLeft").value=Math.max(0,days(c.end_date));$("editNote").value=c.note||"";$("editDialog").showModal();return;
+      $("editId").value=c.id;$("editName").value=c.name||"";$("editPhone").value=c.phone||"";$("editStart").value=c.start_date;$("editDaysLeft").value=days(c.end_date)===null?"":Math.max(0,days(c.end_date));$("editNote").value=c.note||"";$("editDialog").showModal();return;
     }
     if(a==="extend"){
       const scope=b.closest(".actions,.manage-body"),sel=scope.querySelector(`[data-sel="${id}"]`),p=sel.value;
-      const base=days(c.end_date)>0?c.end_date:today(),newEnd=addPeriod(base,p);
+      const base=(days(c.end_date)!==null&&days(c.end_date)>0)?c.end_date:today(),newEnd=addPeriod(base,p);
       const{error}=await sb.from("clients").update({end_date:newEnd,period:p}).eq("id",id);if(error)throw error;
       if(c.wg_client_id)await api(`/api/wg/client/${c.wg_client_id}/enable`,{method:"POST"});
       msg("Подписка продлена, VPN включён");return load();
@@ -242,7 +303,7 @@ $("editForm").addEventListener("submit",async e=>{
   $("editDialog").close();msg("Изменения сохранены");load();
 });
 
-$("closeEdit").onclick=()=>$("editDialog").close();$("search").oninput=render;$("refreshBtn").onclick=load;$("startDate").onchange=preview;$("period").onchange=()=>{preview();updateReferralHint()};$("referrer").onchange=updateReferralHint;$("logoutBtn").onclick=()=>sb.auth.signOut();
+$("closeEdit").onclick=()=>$("editDialog").close();$("search").oninput=render;$("refreshBtn").onclick=load;if($("importWgBtn"))$("importWgBtn").onclick=importWireGuardClients;$("startDate").onchange=preview;$("period").onchange=()=>{preview();updateReferralHint()};$("referrer").onchange=updateReferralHint;$("logoutBtn").onclick=()=>sb.auth.signOut();
 $("loginForm").addEventListener("submit",async e=>{e.preventDefault();const{error}=await sb.auth.signInWithPassword({email:$("email").value.trim(),password:$("password").value});$("authMessage").textContent=error?("Ошибка входа: "+error.message):""});
 sb.auth.onAuthStateChange(async(_e,s)=>{session=s;const yes=!!s;$("authScreen").classList.toggle("hidden",yes);$("app").classList.toggle("hidden",!yes);if(yes){$("startDate").value=today();$("period").value="1m";preview();await load();updateReferralHint()}});
 (async()=>{const{data}=await sb.auth.getSession();session=data.session;const yes=!!session;$("authScreen").classList.toggle("hidden",yes);$("app").classList.toggle("hidden",!yes);if(yes){$("startDate").value=today();$("period").value="1m";preview();await load();updateReferralHint()}})();
