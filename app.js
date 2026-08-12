@@ -6,9 +6,9 @@ if(!configured){$("setupWarning").classList.remove("hidden");return}
 
 const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY);
 const BACKEND="https://80-90-179-65.sslip.io";
-let session=null,clients=[],wgClients=[],attentionOnly=false;
+let session=null,clients=[],wgClients=[],attentionOnly=false,clientFilter="all";
 
-const labels={"trial":"Пробный — 24 часа","14d":"14 дней","1m":"1 месяц","2m":"2 месяца","6m":"6 месяцев","12m":"12 месяцев","imported":"Импорт"};
+const labels={"trial":"Пробный — 24 часа","14d":"14 дней","1m":"1 месяц","2m":"2 месяца","6m":"6 месяцев","12m":"12 месяцев","lifetime":"Навсегда","imported":"Импорт"};
 const referralBonus={"1m":14,"6m":30,"12m":60};
 const pad=n=>String(n).padStart(2,"0");
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`};
@@ -17,7 +17,7 @@ const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const fmt=s=>{if(!s)return"";const[y,m,d]=s.split("-");return `${d}.${m}.${y}`};
 const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");
 const days=s=>s?Math.round((parse(s)-parse(today()))/86400000):null;
-const status=s=>{const d=days(s);return d===null?["Срок не указан","unknown"]:d<=0?["Истекла","expired"]:d<=7?["Скоро","soon"]:["Активна","active"]};
+const status=(s,period)=>{if(period==="lifetime")return["Навсегда ∞","active"];const d=days(s);return d===null?["Срок не указан","unknown"]:d<=0?["Истекла","expired"]:d<=7?["Скоро","soon"]:["Активна","active"]};
 
 function addPeriod(start,p){
   const d=parse(start);
@@ -34,6 +34,7 @@ function addDaysToDate(s,n){const d=parse(s);d.setDate(d.getDate()+n);return iso
 function msg(t="",bad=false){$("message").textContent=t;$("message").style.color=bad?"var(--red)":"var(--green)"}
 
 function attentionNeeded(c){
+  if(c.period==="lifetime"){const w=wgFor(c);return !!c.wg_client_id&&(!w||!w.enabled)}
   const d=days(c.end_date),w=wgFor(c);
   return d===null || d<=7 || (c.wg_client_id && (!w || !w.enabled));
 }
@@ -131,12 +132,37 @@ function sortClientsNewestFirst(){
 
 function renderStats(){
   let a=0,s=0,e=0;
-  clients.forEach(c=>{const d=days(c.end_date);if(d===null)return;if(d<=0)e++;else{a++;if(d<=7)s++}});
+  clients.forEach(c=>{if(c.period==="lifetime"){a++;return}const d=days(c.end_date);if(d===null)return;if(d<=0)e++;else{a++;if(d<=7)s++}});
   $("sTotal").textContent=clients.length;$("sActive").textContent=a;$("sSoon").textContent=s;$("sExpired").textContent=e;
 }
 function filtered(){
   const q=$("search").value.trim().toLowerCase();
-  const base=attentionOnly?clients.filter(attentionNeeded):clients; return q?base.filter(c=>(c.name||"").toLowerCase().includes(q)||(c.phone||"").toLowerCase().includes(q)||(c.note||"").toLowerCase().includes(q)):base;
+
+  let base=attentionOnly?clients.filter(attentionNeeded):clients;
+
+  if(clientFilter!=="all"){
+    base=base.filter(c=>{
+      const d=days(c.end_date),w=wgFor(c);
+      if(clientFilter==="active")return c.period==="lifetime"||(d!==null&&d>7);
+      if(clientFilter==="soon")return d!==null&&d>0&&d<=7;
+      if(clientFilter==="expired")return d!==null&&d<=0;
+      if(clientFilter==="unknown")return c.period!=="lifetime"&&d===null;
+      if(clientFilter==="wg_on")return !!(w&&w.enabled);
+      if(clientFilter==="wg_off")return !!c.wg_client_id&&(!w||!w.enabled);
+      return true;
+    });
+  }
+
+  if(!q)return base;
+
+  return base.filter(c=>{
+    const w=wgFor(c);
+    return (c.name||"").toLowerCase().includes(q)
+      ||(c.phone||"").toLowerCase().includes(q)
+      ||(c.note||"").toLowerCase().includes(q)
+      ||(w?.name||"").toLowerCase().includes(q)
+      ||(w?.address||"").toLowerCase().includes(q);
+  });
 }
 function wgStatus(c){
   if(!c.wg_client_id)return '<span class="wg-status none">Не привязан</span>';
@@ -163,23 +189,23 @@ function wgControls(c){
   </div>`;
 }
 function subControls(c){
-  return `<select data-sel="${c.id}"><option value="trial">24 часа</option><option value="14d">14 дней</option><option value="1m">1 месяц</option><option value="2m">2 месяца</option><option value="6m">6 месяцев</option><option value="12m">12 месяцев</option></select><button data-a="extend" data-id="${c.id}">Продлить</button><button class="secondary" data-a="edit" data-id="${c.id}">Изменить</button><button class="secondary" data-a="history" data-id="${c.id}">История</button><button class="danger" data-a="delete-menu" data-id="${c.id}">Удаление…</button>`;
+  return `<select data-sel="${c.id}"><option value="trial">24 часа</option><option value="14d">14 дней</option><option value="1m">1 месяц</option><option value="2m">2 месяца</option><option value="6m">6 месяцев</option><option value="12m">12 месяцев</option><option value="lifetime">Навсегда ∞</option></select><button data-a="extend" data-id="${c.id}">Продлить</button><button class="secondary" data-a="edit" data-id="${c.id}">Изменить</button><button class="secondary" data-a="history" data-id="${c.id}">История</button><button class="danger" data-a="delete" data-id="${c.id}">Удалить</button>`;
 }
 function render(){sortClientsNewestFirst();
   renderStats();const ac=clients.filter(attentionNeeded).length;if($("attentionCount"))$("attentionCount").textContent=ac;const list=filtered();$("empty").classList.toggle("hidden",list.length>0);
-  $("rows").innerHTML=list.map(c=>{const[st,cl]=status(c.end_date);return `<tr>
+  $("rows").innerHTML=list.map(c=>{const[st,cl]=status(c.end_date,c.period);return `<tr>
     <td><b>${esc(c.name)}</b>${c.note?`<small>${esc(c.note)}</small>`:""}</td>
     <td>${esc(c.phone||"")}</td>
     <td>${esc((clients.find(x=>x.id===c.referrer_id)||{}).name||"—")}</td>
     <td>${wgStatus(c)}${wgControls(c)}</td>
     <td>${esc(labels[c.period]||c.period||"—")}</td>
-    <td>${fmt(c.start_date)}</td><td>${c.end_date?fmt(c.end_date):"—"}</td><td>${days(c.end_date)===null?"—":days(c.end_date)}</td>
+    <td>${fmt(c.start_date)}</td><td>${c.period==="lifetime"?"Навсегда":(c.end_date?fmt(c.end_date):"—")}</td><td>${c.period==="lifetime"?"∞":(days(c.end_date)===null?"—":days(c.end_date))}</td>
     <td><span class="status ${cl}">${st}</span></td>
     <td><div class="actions">${subControls(c)}</div></td>
   </tr>`}).join("");
-  $("cards").innerHTML=list.map(c=>{const[st,cl]=status(c.end_date);return `<article class="card">
+  $("cards").innerHTML=list.map(c=>{const[st,cl]=status(c.end_date,c.period);return `<article class="card">
     <div class="card-top"><div><h3>${esc(c.name)}</h3>${c.phone?`<a class="phone" href="tel:${esc(c.phone)}">${esc(c.phone)}</a>`:""}</div><span class="status ${cl}">${st}</span></div>
-    <div class="info"><div><small>Тариф</small><b>${esc(labels[c.period]||c.period||"—")}</b></div><div><small>До</small><b>${c.end_date?fmt(c.end_date):"—"}</b></div><div><small>Осталось</small><b>${days(c.end_date)===null?"—":days(c.end_date)+" дн."}</b></div></div>
+    <div class="info"><div><small>Тариф</small><b>${esc(labels[c.period]||c.period||"—")}</b></div><div><small>До</small><b>${c.period==="lifetime"?"Навсегда":(c.end_date?fmt(c.end_date):"—")}</b></div><div><small>Осталось</small><b>${c.period==="lifetime"?"∞":(days(c.end_date)===null?"—":days(c.end_date)+" дн.")}</b></div></div>
     ${c.referrer_id?`<div class="note">Пригласил: <b>${esc((clients.find(x=>x.id===c.referrer_id)||{}).name||"—")}</b></div>`:""}
     ${c.note?`<div class="note">${esc(c.note)}</div>`:""}
     <div class="note"><b>WireGuard:</b> ${wgStatus(c)}${wgControls(c)}</div>
@@ -293,28 +319,22 @@ document.addEventListener("click",async e=>{
   try{
     const a=b.dataset.a;
     if(a==="history"){return showHistory(c)}
-    if(a==="delete-menu"){
-      const alsoWG=c.wg_client_id && confirm(`Удаление «${c.name}».\n\nОК — перейти к ОПАСНОМУ удалению из VPN MANAGER + WireGuard.\nОтмена — предложить безопасное удаление только из VPN MANAGER.`);
-      if(alsoWG){
-        const typed=prompt(`ОПАСНАЯ ОПЕРАЦИЯ.\nWireGuard-профиль будет удалён без возможности восстановления.\n\nДля подтверждения введи ТОЧНО имя клиента:\n${c.name}`);
-        if(typed!==c.name){msg("Удаление отменено");return}
-        if(!confirm(`Последнее подтверждение: удалить «${c.name}» ИЗ WIREGUARD и VPN MANAGER?`))return;
-        await api(`/api/wg/client/${c.wg_client_id}`,{method:"DELETE"});
-        const{error}=await sb.from("clients").delete().eq("id",id);if(error)throw error;
-        msg("Клиент удалён из VPN MANAGER и WireGuard");return load();
-      }
-      if(!confirm(`Удалить «${c.name}» ТОЛЬКО из VPN MANAGER?\nWireGuard-профиль останется без изменений.`))return;
-      const{error}=await sb.from("clients").delete().eq("id",id);if(error)throw error;msg("Удалено только из VPN MANAGER. WireGuard сохранён.");return load();
+    if(a==="delete"){
+      if(!confirm(`Удалить клиента «${c.name}» из VPN MANAGER? WireGuard-профиль останется без изменений.`))return;
+      const{error}=await sb.from("clients").delete().eq("id",id);
+      if(error)throw error;
+      msg("Клиент удалён из VPN MANAGER. WireGuard сохранён.");
+      return load();
     }
     if(a==="edit"){
-      $("editId").value=c.id;$("editName").value=c.name||"";$("editPhone").value=c.phone||"";$("editStart").value=c.start_date;$("editDaysLeft").value=days(c.end_date)===null?"":Math.max(0,days(c.end_date));$("editNote").value=c.note||"";$("editDialog").showModal();return;
+      $("editId").value=c.id;$("editName").value=c.name||"";$("editPhone").value=c.phone||"";$("editStart").value=c.start_date;$("editDaysLeft").value=c.period==="lifetime"?"":(days(c.end_date)===null?"":Math.max(0,days(c.end_date)));$("editNote").value=c.note||"";$("editDialog").showModal();return;
     }
     if(a==="extend"){
       const scope=b.closest(".actions,.manage-body"),sel=scope.querySelector(`[data-sel="${id}"]`),p=sel.value;
       const base=(days(c.end_date)!==null&&days(c.end_date)>0)?c.end_date:today(),newEnd=addPeriod(base,p);
       const{error}=await sb.from("clients").update({end_date:newEnd,period:p}).eq("id",id);if(error)throw error;
       if(c.wg_client_id)await api(`/api/wg/client/${c.wg_client_id}/enable`,{method:"POST"});
-      await logHistory(id,"extended",`Подписка продлена: ${labels[p]||p}, до ${fmt(newEnd)}; VPN включён`);msg("Подписка продлена, VPN включён");return load();
+      await logHistory(id,"extended",`Подписка продлена: ${labels[p]||p}${p==="lifetime"?" ∞":", до "+fmt(newEnd)}; VPN включён`);msg("Подписка продлена, VPN включён");return load();
     }
     if(a==="wg-create"){
       const x=await apiJson("/api/wg/client",{method:"POST",body:JSON.stringify({name:c.name})});
@@ -358,7 +378,7 @@ $("editForm").addEventListener("submit",async e=>{
 
 $("closeEdit").onclick=()=>$("editDialog").close();
 $("closeHistory").onclick=()=>$("historyDialog").close();
-$("attentionBtn").onclick=()=>{attentionOnly=!attentionOnly;$("attentionBtn").classList.toggle("attention-active",attentionOnly);$("attentionBtn").firstChild.textContent=attentionOnly?"← Все клиенты ":"⚠ Требуют внимания ";render()};$("search").oninput=render;$("refreshBtn").onclick=load;if($("importWgBtn"))$("importWgBtn").onclick=importWireGuardClients;$("startDate").onchange=preview;$("period").onchange=()=>{preview();updateReferralHint()};$("referrer").onchange=updateReferralHint;$("logoutBtn").onclick=()=>sb.auth.signOut();
+$("attentionBtn").onclick=()=>{attentionOnly=!attentionOnly;$("attentionBtn").classList.toggle("attention-active",attentionOnly);$("attentionBtn").firstChild.textContent=attentionOnly?"← Все клиенты ":"⚠ Требуют внимания ";render()};$("search").oninput=render;if($("clientFilter"))$("clientFilter").onchange=e=>{clientFilter=e.target.value;render()};$("refreshBtn").onclick=load;if($("importWgBtn"))$("importWgBtn").onclick=importWireGuardClients;$("startDate").onchange=preview;$("period").onchange=()=>{preview();updateReferralHint()};$("referrer").onchange=updateReferralHint;$("logoutBtn").onclick=()=>sb.auth.signOut();
 $("loginForm").addEventListener("submit",async e=>{e.preventDefault();const{error}=await sb.auth.signInWithPassword({email:$("email").value.trim(),password:$("password").value});$("authMessage").textContent=error?("Ошибка входа: "+error.message):""});
 sb.auth.onAuthStateChange(async(_e,s)=>{session=s;const yes=!!s;$("authScreen").classList.toggle("hidden",yes);$("app").classList.toggle("hidden",!yes);if(yes){$("startDate").value=today();$("period").value="1m";preview();await load();updateReferralHint()}});
 (async()=>{const{data}=await sb.auth.getSession();session=data.session;const yes=!!session;$("authScreen").classList.toggle("hidden",yes);$("app").classList.toggle("hidden",!yes);if(yes){$("startDate").value=today();$("period").value="1m";preview();await load();updateReferralHint()}})();
