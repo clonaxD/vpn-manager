@@ -331,8 +331,8 @@ document.addEventListener("click",async e=>{
     }
     if(a==="extend"){
       const scope=b.closest(".actions,.manage-body"),sel=scope.querySelector(`[data-sel="${id}"]`),p=sel.value;
-      const base=(days(c.end_date)!==null&&days(c.end_date)>0)?c.end_date:today(),newEnd=addPeriod(base,p);
-      const{error}=await sb.from("clients").update({end_date:newEnd,period:p}).eq("id",id);if(error)throw error;
+      const base=(days(c.end_date)!==null&&days(c.end_date)>0)?c.end_date:today(),newEnd=p==="lifetime"?null:addPeriod(base,p);
+      const{error}=await sb.from("clients").update({end_date:newEnd,period:p,period:p}).eq("id",id);if(error)throw error;
       if(c.wg_client_id)await api(`/api/wg/client/${c.wg_client_id}/enable`,{method:"POST"});
       await logHistory(id,"extended",`Подписка продлена: ${labels[p]||p}${p==="lifetime"?" ∞":", до "+fmt(newEnd)}; VPN включён`);msg("Подписка продлена, VPN включён");return load();
     }
