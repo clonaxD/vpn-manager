@@ -7,6 +7,7 @@ create table if not exists public.clients (
   end_date date not null,
   period text not null default '1m',
   note text default '',
+  referrer_id bigint null,
   created_at timestamptz not null default now()
 );
 
@@ -27,3 +28,5 @@ create policy "clients_delete_own" on public.clients for delete using (auth.uid(
 
 create index if not exists clients_user_id_idx on public.clients(user_id);
 create index if not exists clients_end_date_idx on public.clients(end_date);
+
+create index if not exists clients_referrer_id_idx on public.clients(referrer_id);
