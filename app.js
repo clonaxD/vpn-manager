@@ -148,7 +148,8 @@ $("addForm").addEventListener("submit",async e=>{
   const start=$("startDate").value,p=$("period").value,referrerId=$("referrer").value?Number($("referrer").value):null;
   let wgClientId=null;
   try{
-    if($("createVpn").checked){
+    const createVpnEl=$("createVpn");
+    if(!createVpnEl || createVpnEl.checked){
       const x=await apiJson("/api/wg/client",{method:"POST",body:JSON.stringify({name:$("name").value.trim()})});
       wgClientId=x.client?.id||null;
       if(!wgClientId)throw new Error("Не получен ID WireGuard");
@@ -165,7 +166,7 @@ $("addForm").addEventListener("submit",async e=>{
         if(ref.wg_client_id){try{await api(`/api/wg/client/${ref.wg_client_id}/enable`,{method:"POST"})}catch{}}
       }
     }
-    e.target.reset();$("startDate").value=today();$("period").value="1m";$("createVpn").checked=true;preview();updateReferralHint();msg("Клиент добавлен");await load();
+    e.target.reset();$("startDate").value=today();$("period").value="1m";if($("createVpn"))$("createVpn").checked=true;preview();updateReferralHint();msg("Клиент добавлен");await load();
   }catch(err){msg("Ошибка добавления: "+err.message,true)}
 });
 
