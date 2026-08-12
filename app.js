@@ -287,7 +287,7 @@ async function importWireGuardClients(){
 }
 
 $("addForm").addEventListener("submit",async e=>{
-  e.preventDefault();const p=$("period").value;
+  e.preventDefault();
   const start=$("startDate").value,p=$("period").value,referrerId=$("referrer").value?Number($("referrer").value):null;
   let wgClientId=null;
   try{
