@@ -34,12 +34,27 @@ function addDaysToDate(s,n){const d=parse(s);d.setDate(d.getDate()+n);return iso
 function msg(t="",bad=false){$("message").textContent=t;$("message").style.color=bad?"var(--red)":"var(--green)"}
 
 async function api(path,opts={}){
-  const {data}=await sb.auth.getSession();
-  const token=data.session?.access_token;
-  if(!token)throw new Error("Нет активной сессии");
-  const headers={...(opts.headers||{}),Authorization:`Bearer ${token}`};
+  let apiToken=localStorage.getItem("vpn_manager_api_token")||"";
+  if(!apiToken){
+    apiToken=prompt("Введите API-токен VPN MANAGER:");
+    if(!apiToken)throw new Error("API-токен не указан");
+    localStorage.setItem("vpn_manager_api_token",apiToken);
+  }
+
+  const headers={...(opts.headers||{}),"X-VPN-Token":apiToken};
   if(opts.body && typeof opts.body==="string")headers["Content-Type"]="application/json";
-  const r=await fetch(BACKEND+path,{...opts,headers});
+
+  let r=await fetch(BACKEND+path,{...opts,headers});
+
+  if(r.status===401){
+    localStorage.removeItem("vpn_manager_api_token");
+    apiToken=prompt("API-токен неверный. Введите новый:");
+    if(!apiToken)throw new Error("Неверный API-токен");
+    localStorage.setItem("vpn_manager_api_token",apiToken);
+    headers["X-VPN-Token"]=apiToken;
+    r=await fetch(BACKEND+path,{...opts,headers});
+  }
+
   if(!r.ok){
     let detail="";
     try{detail=(await r.json()).error||""}catch{}
